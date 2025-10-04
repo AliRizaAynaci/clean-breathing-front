@@ -1,0 +1,1 @@
+export { updateAQI } from './aqi';
