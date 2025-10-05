@@ -39,7 +39,6 @@ const RISK_LEVEL_LABEL_MAP = {
 	'very-unhealthy': 'Çok Sağlıksız',
 	hazardous: 'Tehlikeli',
 	extreme: 'Aşırı Tehlikeli',
-	unknown: 'Veri Yok',
 };
 
 const METRIC_UNITS = {
@@ -85,40 +84,6 @@ const PM10_AQI_BREAKPOINTS = [
 	{ concLow: 425, concHigh: 504, aqiLow: 301, aqiHigh: 400 },
 	{ concLow: 505, concHigh: 604, aqiLow: 401, aqiHigh: 500 },
 ];
-
-// Calculate AQI from concentration value using breakpoints
-const calculateAQI = (concentration, breakpoints) => {
-	if (concentration === null || concentration === undefined || isNaN(concentration)) {
-		return null;
-	}
-
-	for (const bp of breakpoints) {
-		if (concentration >= bp.concLow && concentration <= bp.concHigh) {
-			const aqiRange = bp.aqiHigh - bp.aqiLow;
-			const concRange = bp.concHigh - bp.concLow;
-			const concFromLow = concentration - bp.concLow;
-			return Math.round((aqiRange / concRange) * concFromLow + bp.aqiLow);
-		}
-	}
-
-	// If concentration is above all breakpoints, return max AQI
-	if (concentration > breakpoints[breakpoints.length - 1].concHigh) {
-		return 500;
-	}
-
-	return null;
-};
-
-// Determine risk level from AQI value
-const getRiskLevelFromAQI = (aqi) => {
-	if (aqi === null || aqi === undefined) return 'unknown';
-	if (aqi <= 50) return 'good';
-	if (aqi <= 100) return 'moderate';
-	if (aqi <= 150) return 'unhealthy-sensitive';
-	if (aqi <= 200) return 'unhealthy';
-	if (aqi <= 300) return 'very-unhealthy';
-	return 'hazardous';
-};
 
 const toNumber = (value) => {
 	if (typeof value === 'number' && !Number.isNaN(value)) {
@@ -202,34 +167,12 @@ export const formatMetricValue = (key, value) => {
 const normalizeAirQualityResponse = (payload = {}) => {
 	const latitude = pickNumeric(payload.latitude, payload.lat, payload.Latitude);
 	const longitude = pickNumeric(payload.longitude, payload.lng, payload.long, payload.Longitude);
-	let riskLevel = payload.risk_level ?? payload.riskLevel ?? null;
-	
-	// Normalize metrics first
-	const metrics = normalizeMetrics(payload.metrics);
-
-	// If backend returns 'unknown', calculate fallback risk level from PM2.5/PM10
-	if (riskLevel === 'unknown' || !riskLevel) {
-		const pm25 = metrics.pm25;
-		const pm10 = metrics.pm10;
-		
-		// Try to calculate AQI from PM2.5 first (more accurate), fallback to PM10
-		let calculatedAQI = null;
-		if (pm25 !== null && pm25 !== undefined) {
-			calculatedAQI = calculateAQI(pm25, PM25_AQI_BREAKPOINTS);
-		} else if (pm10 !== null && pm10 !== undefined) {
-			calculatedAQI = calculateAQI(pm10, PM10_AQI_BREAKPOINTS);
-		}
-		
-		if (calculatedAQI !== null) {
-			riskLevel = getRiskLevelFromAQI(calculatedAQI);
-			console.log(`Backend returned 'unknown', calculated fallback risk level: ${riskLevel} (AQI: ${calculatedAQI})`);
-		}
-	}
+	const riskLevel = payload.risk_level ?? payload.riskLevel ?? null;
 
 	return {
 		latitude,
 		longitude,
-		metrics,
+		metrics: normalizeMetrics(payload.metrics),
 		riskLevel,
 		riskLevelLabel: getRiskLevelLabel(riskLevel),
 		riskLevelClassName: getRiskLevelClassName(riskLevel),
@@ -251,40 +194,20 @@ export const fetchAirQualityData = async ({ latitude, longitude, signal, baseUrl
 	url.searchParams.set('latitude', latNumber.toString());
 	url.searchParams.set('longitude', longNumber.toString());
 
-	try {
-		console.log(`Attempting to fetch from backend: ${url.toString()}`);
-		
-		const response = await fetch(url.toString(), {
-			method: 'GET',
-			credentials: 'include',
-			signal,
-			headers: {
-				Accept: 'application/json',
-			},
-		});
+	const response = await fetch(url.toString(), {
+		method: 'GET',
+		credentials: 'include',
+		signal,
+		headers: {
+			Accept: 'application/json',
+		},
+	});
 
-		if (!response.ok) {
-			console.warn(`Backend responded with status ${response.status}`);
-			
-			if (response.status === 401 || response.status === 403) {
-				console.warn('Backend returned unauthorized, falling back to Open-Meteo');
-				const fallbackPayload = await fetchAirQualityDataFromOpenMeteo({
-					latitude: latNumber,
-					longitude: longNumber,
-					signal,
-				});
-				return normalizeAirQualityResponse(fallbackPayload);
-			}
-
-			let message = '';
-			try {
-				message = await response.text();
-			} catch (error) {
-				console.warn('Could not read error response:', error);
-			}
-			
-			// For other HTTP errors, also try fallback
-			console.warn(`Backend error (${response.status}): ${message}. Trying Open-Meteo fallback`);
+	if (!response.ok) {
+		if (response.status === 401 || response.status === 403) {
+			console.warn(
+				'Arka uç istekleri yetkisiz yanıt döndürdü. Open-Meteo üzerinden yedek veri alınacak.'
+			);
 			const fallbackPayload = await fetchAirQualityDataFromOpenMeteo({
 				latitude: latNumber,
 				longitude: longNumber,
@@ -293,22 +216,17 @@ export const fetchAirQualityData = async ({ latitude, longitude, signal, baseUrl
 			return normalizeAirQualityResponse(fallbackPayload);
 		}
 
-		const data = await response.json();
-		console.log('Successfully received data from backend:', { riskLevel: data.risk_level, hasMetrics: !!data.metrics });
-		return normalizeAirQualityResponse(data);
-		
-	} catch (error) {
-		// Network error, CORS, timeout, etc.
-		console.warn('Backend fetch failed with network error:', error.message);
-		console.log('Falling back to Open-Meteo API');
-		
-		const fallbackPayload = await fetchAirQualityDataFromOpenMeteo({
-			latitude: latNumber,
-			longitude: longNumber,
-			signal,
-		});
-		return normalizeAirQualityResponse(fallbackPayload);
+		let message = '';
+		try {
+			message = await response.text();
+		} catch (error) {
+			console.warn('Sunucu hata mesajı okunamadı:', error);
+		}
+		throw new Error(message || `Air quality verisi alınamadı (${response.status})`);
 	}
+
+	const data = await response.json();
+	return normalizeAirQualityResponse(data);
 };
 
 const fetchAirQualityDataFromOpenMeteo = async ({ latitude, longitude, signal }) => {
