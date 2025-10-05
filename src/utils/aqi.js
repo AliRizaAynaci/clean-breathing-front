@@ -85,6 +85,40 @@ const PM10_AQI_BREAKPOINTS = [
 	{ concLow: 505, concHigh: 604, aqiLow: 401, aqiHigh: 500 },
 ];
 
+// Calculate AQI from concentration value using breakpoints
+const calculateAQI = (concentration, breakpoints) => {
+	if (concentration === null || concentration === undefined || isNaN(concentration)) {
+		return null;
+	}
+
+	for (const bp of breakpoints) {
+		if (concentration >= bp.concLow && concentration <= bp.concHigh) {
+			const aqiRange = bp.aqiHigh - bp.aqiLow;
+			const concRange = bp.concHigh - bp.concLow;
+			const concFromLow = concentration - bp.concLow;
+			return Math.round((aqiRange / concRange) * concFromLow + bp.aqiLow);
+		}
+	}
+
+	// If concentration is above all breakpoints, return max AQI
+	if (concentration > breakpoints[breakpoints.length - 1].concHigh) {
+		return 500;
+	}
+
+	return null;
+};
+
+// Determine risk level from AQI value
+const getRiskLevelFromAQI = (aqi) => {
+	if (aqi === null || aqi === undefined) return 'unknown';
+	if (aqi <= 50) return 'good';
+	if (aqi <= 100) return 'moderate';
+	if (aqi <= 150) return 'unhealthy-sensitive';
+	if (aqi <= 200) return 'unhealthy';
+	if (aqi <= 300) return 'very-unhealthy';
+	return 'hazardous';
+};
+
 const toNumber = (value) => {
 	if (typeof value === 'number' && !Number.isNaN(value)) {
 		return value;
@@ -249,7 +283,8 @@ export const fetchAirQualityData = async ({ latitude, longitude, signal, baseUrl
 			}
 			
 			// For other HTTP errors, also try fallback
-			console.warn(`Backend error (${response.status}), trying Open-Meteo fallback`);
+			console.warn(`Backend error (${response.status}): ${message || 'No error message'}`);
+			console.log('Trying Open-Meteo fallback');
 			const fallbackPayload = await fetchAirQualityDataFromOpenMeteo({
 				latitude: latNumber,
 				longitude: longNumber,
