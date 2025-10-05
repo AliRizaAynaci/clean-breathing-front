@@ -1,12 +1,16 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { getApiBaseUrl } from '../utils';
+
+const DEFAULT_API_BASE_URL = 'https://clean-breathing-710737072c4d.herokuapp.com';
 
 export const useGoogleAuth = () => {
     const [user, setUser] = useState(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
 
-    const apiBaseUrl = useMemo(() => getApiBaseUrl(), []);
+    const apiBaseUrl = useMemo(
+        () => process.env.REACT_APP_API_BASE_URL || DEFAULT_API_BASE_URL,
+        []
+    );
 
     const fetchCurrentUser = useCallback(async () => {
         setLoading(true);
@@ -74,12 +78,9 @@ export const useGoogleAuth = () => {
 
                 // Inline the fetch logic to avoid dependency issues
                 try {
-                    console.log('[Auth Debug] Fetching user from:', `${apiBaseUrl}/me`);
                     const response = await fetch(`${apiBaseUrl}/me`, {
                         credentials: 'include',
                     });
-
-                    console.log('[Auth Debug] Response status:', response.status);
 
                     if (!response.ok) {
                         if (response.status !== 401) {
@@ -91,7 +92,6 @@ export const useGoogleAuth = () => {
                         }
                     } else {
                         const data = await response.json();
-                        console.log('[Auth Debug] User data received:', data);
                         if (isMounted) {
                             setUser(data);
                             setError(null);
