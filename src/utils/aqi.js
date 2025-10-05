@@ -18,6 +18,7 @@ const RISK_LEVEL_CLASS_MAP = {
 	'very-unhealthy': 'aqi-very-unhealthy',
 	hazardous: 'aqi-hazardous',
 	extreme: 'aqi-hazardous',
+	unknown: 'aqi-moderate',
 };
 
 const RISK_LEVEL_LABEL_MAP = {
@@ -38,6 +39,7 @@ const RISK_LEVEL_LABEL_MAP = {
 	'very-unhealthy': 'Çok Sağlıksız',
 	hazardous: 'Tehlikeli',
 	extreme: 'Aşırı Tehlikeli',
+	unknown: 'Veri Yok',
 };
 
 const METRIC_UNITS = {
@@ -83,6 +85,40 @@ const PM10_AQI_BREAKPOINTS = [
 	{ concLow: 425, concHigh: 504, aqiLow: 301, aqiHigh: 400 },
 	{ concLow: 505, concHigh: 604, aqiLow: 401, aqiHigh: 500 },
 ];
+
+// Calculate AQI from concentration value using breakpoints
+const calculateAQI = (concentration, breakpoints) => {
+	if (concentration === null || concentration === undefined || isNaN(concentration)) {
+		return null;
+	}
+
+	for (const bp of breakpoints) {
+		if (concentration >= bp.concLow && concentration <= bp.concHigh) {
+			const aqiRange = bp.aqiHigh - bp.aqiLow;
+			const concRange = bp.concHigh - bp.concLow;
+			const concFromLow = concentration - bp.concLow;
+			return Math.round((aqiRange / concRange) * concFromLow + bp.aqiLow);
+		}
+	}
+
+	// If concentration is above all breakpoints, return max AQI
+	if (concentration > breakpoints[breakpoints.length - 1].concHigh) {
+		return 500;
+	}
+
+	return null;
+};
+
+// Determine risk level from AQI value
+const getRiskLevelFromAQI = (aqi) => {
+	if (aqi === null || aqi === undefined) return 'unknown';
+	if (aqi <= 50) return 'good';
+	if (aqi <= 100) return 'moderate';
+	if (aqi <= 150) return 'unhealthy-sensitive';
+	if (aqi <= 200) return 'unhealthy';
+	if (aqi <= 300) return 'very-unhealthy';
+	return 'hazardous';
+};
 
 const toNumber = (value) => {
 	if (typeof value === 'number' && !Number.isNaN(value)) {
@@ -166,12 +202,34 @@ export const formatMetricValue = (key, value) => {
 const normalizeAirQualityResponse = (payload = {}) => {
 	const latitude = pickNumeric(payload.latitude, payload.lat, payload.Latitude);
 	const longitude = pickNumeric(payload.longitude, payload.lng, payload.long, payload.Longitude);
-	const riskLevel = payload.risk_level ?? payload.riskLevel ?? null;
+	let riskLevel = payload.risk_level ?? payload.riskLevel ?? null;
+	
+	// Normalize metrics first
+	const metrics = normalizeMetrics(payload.metrics);
+
+	// If backend returns 'unknown', calculate fallback risk level from PM2.5/PM10
+	if (riskLevel === 'unknown' || !riskLevel) {
+		const pm25 = metrics.pm25;
+		const pm10 = metrics.pm10;
+		
+		// Try to calculate AQI from PM2.5 first (more accurate), fallback to PM10
+		let calculatedAQI = null;
+		if (pm25 !== null && pm25 !== undefined) {
+			calculatedAQI = calculateAQI(pm25, PM25_AQI_BREAKPOINTS);
+		} else if (pm10 !== null && pm10 !== undefined) {
+			calculatedAQI = calculateAQI(pm10, PM10_AQI_BREAKPOINTS);
+		}
+		
+		if (calculatedAQI !== null) {
+			riskLevel = getRiskLevelFromAQI(calculatedAQI);
+			console.log(`Backend returned 'unknown', calculated fallback risk level: ${riskLevel} (AQI: ${calculatedAQI})`);
+		}
+	}
 
 	return {
 		latitude,
 		longitude,
-		metrics: normalizeMetrics(payload.metrics),
+		metrics,
 		riskLevel,
 		riskLevelLabel: getRiskLevelLabel(riskLevel),
 		riskLevelClassName: getRiskLevelClassName(riskLevel),
