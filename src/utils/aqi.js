@@ -251,20 +251,40 @@ export const fetchAirQualityData = async ({ latitude, longitude, signal, baseUrl
 	url.searchParams.set('latitude', latNumber.toString());
 	url.searchParams.set('longitude', longNumber.toString());
 
-	const response = await fetch(url.toString(), {
-		method: 'GET',
-		credentials: 'include',
-		signal,
-		headers: {
-			Accept: 'application/json',
-		},
-	});
+	try {
+		console.log(`Attempting to fetch from backend: ${url.toString()}`);
+		
+		const response = await fetch(url.toString(), {
+			method: 'GET',
+			credentials: 'include',
+			signal,
+			headers: {
+				Accept: 'application/json',
+			},
+		});
 
-	if (!response.ok) {
-		if (response.status === 401 || response.status === 403) {
-			console.warn(
-				'Arka uç istekleri yetkisiz yanıt döndürdü. Open-Meteo üzerinden yedek veri alınacak.'
-			);
+		if (!response.ok) {
+			console.warn(`Backend responded with status ${response.status}`);
+			
+			if (response.status === 401 || response.status === 403) {
+				console.warn('Backend returned unauthorized, falling back to Open-Meteo');
+				const fallbackPayload = await fetchAirQualityDataFromOpenMeteo({
+					latitude: latNumber,
+					longitude: longNumber,
+					signal,
+				});
+				return normalizeAirQualityResponse(fallbackPayload);
+			}
+
+			let message = '';
+			try {
+				message = await response.text();
+			} catch (error) {
+				console.warn('Could not read error response:', error);
+			}
+			
+			// For other HTTP errors, also try fallback
+			console.warn(`Backend error (${response.status}): ${message}. Trying Open-Meteo fallback`);
 			const fallbackPayload = await fetchAirQualityDataFromOpenMeteo({
 				latitude: latNumber,
 				longitude: longNumber,
@@ -273,17 +293,22 @@ export const fetchAirQualityData = async ({ latitude, longitude, signal, baseUrl
 			return normalizeAirQualityResponse(fallbackPayload);
 		}
 
-		let message = '';
-		try {
-			message = await response.text();
-		} catch (error) {
-			console.warn('Sunucu hata mesajı okunamadı:', error);
-		}
-		throw new Error(message || `Air quality verisi alınamadı (${response.status})`);
+		const data = await response.json();
+		console.log('Successfully received data from backend:', { riskLevel: data.risk_level, hasMetrics: !!data.metrics });
+		return normalizeAirQualityResponse(data);
+		
+	} catch (error) {
+		// Network error, CORS, timeout, etc.
+		console.warn('Backend fetch failed with network error:', error.message);
+		console.log('Falling back to Open-Meteo API');
+		
+		const fallbackPayload = await fetchAirQualityDataFromOpenMeteo({
+			latitude: latNumber,
+			longitude: longNumber,
+			signal,
+		});
+		return normalizeAirQualityResponse(fallbackPayload);
 	}
-
-	const data = await response.json();
-	return normalizeAirQualityResponse(data);
 };
 
 const fetchAirQualityDataFromOpenMeteo = async ({ latitude, longitude, signal }) => {
