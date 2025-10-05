@@ -74,9 +74,12 @@ export const useGoogleAuth = () => {
 
                 // Inline the fetch logic to avoid dependency issues
                 try {
+                    console.log('[Auth Debug] Fetching user from:', `${apiBaseUrl}/me`);
                     const response = await fetch(`${apiBaseUrl}/me`, {
                         credentials: 'include',
                     });
+
+                    console.log('[Auth Debug] Response status:', response.status);
 
                     if (!response.ok) {
                         if (response.status !== 401) {
@@ -88,6 +91,7 @@ export const useGoogleAuth = () => {
                         }
                     } else {
                         const data = await response.json();
+                        console.log('[Auth Debug] User data received:', data);
                         if (isMounted) {
                             setUser(data);
                             setError(null);
