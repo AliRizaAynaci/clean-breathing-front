@@ -1,12 +1,120 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { styles } from '../styles/components';
+import { formatMetricValue } from '../utils';
 
-const AQIInfo = ({ user, threshold = '100', onThresholdChange, onSaveSettings, status }) => {
+const METRIC_CONFIG = [
+    { key: 'temperature', label: 'Sıcaklık', desc: 'Temperature', icon: 'fas fa-thermometer-half' },
+    { key: 'humidity', label: 'Nem', desc: 'Humidity', icon: 'fas fa-tint' },
+    { key: 'pm25', label: 'PM2.5', desc: 'İnce Partiküller', icon: 'fas fa-smog' },
+    { key: 'pm10', label: 'PM10', desc: 'Kaba Partiküller', icon: 'fas fa-cloud' },
+    { key: 'no2', label: 'NO₂', desc: 'Azot Dioksit', icon: 'fas fa-wind' },
+    { key: 'so2', label: 'SO₂', desc: 'Kükürt Dioksit', icon: 'fas fa-fire' },
+    { key: 'co', label: 'CO', desc: 'Karbon Monoksit', icon: 'fas fa-car' },
+    { key: 'populationDensity', label: 'Nüfus Yoğunluğu', desc: 'Population Density', icon: 'fas fa-city' },
+];
+
+const AQIInfo = ({
+    user,
+    threshold = '100',
+    onThresholdChange,
+    onSaveSettings,
+    status,
+    aqiData,
+    aqiLoading,
+    aqiError,
+    selectedLocation,
+}) => {
     const isAuthenticated = Boolean(user);
     const notificationState = status?.state;
     const notificationMessage = status?.message;
+    const helperIconClass =
+        notificationState === 'error'
+            ? 'fas fa-exclamation-circle'
+            : notificationState === 'info'
+            ? 'fas fa-info-circle'
+            : 'fas fa-check-circle';
 
-    const handleThresholdChange = (event) => {
+    const metrics = aqiData?.metrics ?? {};
+    const riskClass = aqiData?.riskLevelClassName ?? 'aqi-moderate';
+    const riskLabel = aqiData?.riskLevelLabel ?? 'Bilinmiyor';
+    const aqiValue = typeof metrics.aqi === 'number' && !Number.isNaN(metrics.aqi) ? Math.round(metrics.aqi) : null;
+
+    const coordinateText = useMemo(() => {
+        if (!selectedLocation || typeof selectedLocation.lat !== 'number' || typeof selectedLocation.lng !== 'number') {
+            return null;
+        }
+        return `${selectedLocation.lat.toFixed(4)}, ${selectedLocation.lng.toFixed(4)}`;
+    }, [selectedLocation]);
+
+    const lastUpdatedText = useMemo(() => {
+        if (!aqiData?.timestamp) {
+            return null;
+        }
+
+        const date = new Date(aqiData.timestamp);
+        if (Number.isNaN(date.getTime())) {
+            return aqiData.timestamp;
+        }
+
+        return date.toLocaleString('tr-TR');
+    }, [aqiData]);
+
+    const mainValue = useMemo(() => {
+        if (aqiLoading) {
+            return '...';
+        }
+        if (aqiError) {
+            return '—';
+        }
+        if (aqiValue !== null) {
+            return aqiValue;
+        }
+        return riskLabel;
+    }, [aqiLoading, aqiError, aqiValue, riskLabel]);
+
+    const mainSubtitle = useMemo(() => {
+        if (aqiLoading) {
+            return 'Hava kalitesi verisi yükleniyor';
+        }
+        if (aqiError) {
+            return aqiError;
+        }
+        if (aqiValue !== null) {
+            return `Risk seviyesi: ${riskLabel}`;
+        }
+        return 'Risk Seviyesi';
+    }, [aqiLoading, aqiError, aqiValue, riskLabel]);
+
+    const metaInfoStyle = {
+        display: 'flex',
+        flexWrap: 'wrap',
+        justifyContent: 'center',
+        gap: '12px',
+        marginTop: '12px',
+        color: '#4a5568',
+        fontSize: '13px',
+    };
+
+    const metaChipStyle = {
+        display: 'flex',
+        alignItems: 'center',
+        gap: '6px',
+    };
+
+    const errorBannerStyle = {
+        marginTop: '12px',
+        padding: '12px 16px',
+        borderRadius: '12px',
+        border: '1px solid rgba(245, 101, 101, 0.4)',
+        background: 'rgba(254, 215, 215, 0.8)',
+        color: '#c53030',
+        fontSize: '14px',
+        display: 'flex',
+        alignItems: 'center',
+        gap: '8px',
+    };
+
+    const handleThresholdChangeInternal = (event) => {
         if (onThresholdChange) {
             onThresholdChange(event.target.value);
         }
@@ -18,13 +126,6 @@ const AQIInfo = ({ user, threshold = '100', onThresholdChange, onSaveSettings, s
         }
     };
 
-    const helperIconClass =
-        notificationState === 'error'
-            ? 'fas fa-exclamation-circle'
-            : notificationState === 'info'
-            ? 'fas fa-info-circle'
-            : 'fas fa-check-circle';
-
     return (
         <div style={styles.card}>
             <div style={styles.cardHeader}>
@@ -33,111 +134,61 @@ const AQIInfo = ({ user, threshold = '100', onThresholdChange, onSaveSettings, s
             </div>
             <div style={styles.aqiInfo}>
                 <div style={styles.aqiValueContainer}>
-                    <div className="aqi-value aqi-good" id="aqi-value" style={styles.aqiValue}>25</div>
-                    <p style={styles.aqiLabel}>Hava Kalitesi İndeksi</p>
+                    <div className={`aqi-value ${riskClass}`} style={styles.aqiValue}>
+                        {aqiLoading ? <i className="fas fa-circle-notch fa-spin"></i> : mainValue}
+                    </div>
+                    <p style={styles.aqiLabel}>{mainSubtitle}</p>
+
+                    {(coordinateText || lastUpdatedText || aqiData?.source) && !aqiLoading && (
+                        <div style={metaInfoStyle}>
+                            {coordinateText && (
+                                <span style={metaChipStyle}>
+                                    <i className="fas fa-map-marker-alt"></i>
+                                    {coordinateText}
+                                </span>
+                            )}
+                            {lastUpdatedText && (
+                                <span style={metaChipStyle}>
+                                    <i className="fas fa-clock"></i>
+                                    {lastUpdatedText}
+                                </span>
+                            )}
+                            {aqiData?.source && (
+                                <span style={metaChipStyle}>
+                                    <i className="fas fa-database"></i>
+                                    Kaynak: {aqiData.source}
+                                </span>
+                            )}
+                        </div>
+                    )}
+
+                    {!aqiLoading && aqiError && (
+                        <div role="alert" style={errorBannerStyle}>
+                            <i className="fas fa-exclamation-triangle"></i>
+                            {aqiError}
+                        </div>
+                    )}
                 </div>
-                
+
                 <div style={styles.aqiDetails}>
-                    <div style={styles.detailItem}>
-                        <div style={styles.detailIcon} className="icon-float">
-                            <i className="fas fa-thermometer-half"></i>
+                    {METRIC_CONFIG.map((config, index) => (
+                        <div key={config.key} style={styles.detailItem}>
+                            <div
+                                style={{
+                                    ...styles.detailIcon,
+                                    animationDelay: `${index * 0.1}s`,
+                                }}
+                                className="icon-float"
+                            >
+                                <i className={config.icon}></i>
+                            </div>
+                            <div style={styles.detailContent}>
+                                <span style={styles.detailLabel}>{config.label}</span>
+                                <span style={styles.detailValue}>{formatMetricValue(config.key, metrics[config.key])}</span>
+                                <span style={styles.detailDesc}>{config.desc}</span>
+                            </div>
                         </div>
-                        <div style={styles.detailContent}>
-                            <span style={styles.detailLabel}>Sıcaklık</span>
-                            <span style={styles.detailValue} id="temperature-value">20°C</span>
-                            <span style={styles.detailDesc}>Temperature</span>
-                        </div>
-                    </div>
-                    <div style={styles.detailItem}>
-                        <div style={{...styles.detailIcon, animationDelay: '0.1s'}} className="icon-float">
-                            <i className="fas fa-tint"></i>
-                        </div>
-                        <div style={styles.detailContent}>
-                            <span style={styles.detailLabel}>Nem</span>
-                            <span style={styles.detailValue} id="humidity-value">65%</span>
-                            <span style={styles.detailDesc}>Humidity</span>
-                        </div>
-                    </div>
-                    <div style={styles.detailItem}>
-                        <div style={{...styles.detailIcon, animationDelay: '0.2s'}} className="icon-float">
-                            <i className="fas fa-smog"></i>
-                        </div>
-                        <div style={styles.detailContent}>
-                            <span style={styles.detailLabel}>PM2.5</span>
-                            <span style={styles.detailValue} id="pm25-value">12 µg/m³</span>
-                            <span style={styles.detailDesc}>İnce Partiküller</span>
-                        </div>
-                    </div>
-                    <div style={styles.detailItem}>
-                        <div style={{...styles.detailIcon, animationDelay: '0.3s'}} className="icon-float">
-                            <i className="fas fa-cloud"></i>
-                        </div>
-                        <div style={styles.detailContent}>
-                            <span style={styles.detailLabel}>PM10</span>
-                            <span style={styles.detailValue} id="pm10-value">24 µg/m³</span>
-                            <span style={styles.detailDesc}>Kaba Partiküller</span>
-                        </div>
-                    </div>
-                    <div style={styles.detailItem}>
-                        <div style={{...styles.detailIcon, animationDelay: '0.4s'}} className="icon-float">
-                            <i className="fas fa-wind"></i>
-                        </div>
-                        <div style={styles.detailContent}>
-                            <span style={styles.detailLabel}>NO2</span>
-                            <span style={styles.detailValue} id="no2-value">18 µg/m³</span>
-                            <span style={styles.detailDesc}>Azot Dioksit</span>
-                        </div>
-                    </div>
-                    <div style={styles.detailItem}>
-                        <div style={{...styles.detailIcon, animationDelay: '0.5s'}} className="icon-float">
-                            <i className="fas fa-fire"></i>
-                        </div>
-                        <div style={styles.detailContent}>
-                            <span style={styles.detailLabel}>SO2</span>
-                            <span style={styles.detailValue} id="so2-value">15 µg/m³</span>
-                            <span style={styles.detailDesc}>Kükürt Dioksit</span>
-                        </div>
-                    </div>
-                    <div style={styles.detailItem}>
-                        <div style={{...styles.detailIcon, animationDelay: '0.6s'}} className="icon-float">
-                            <i className="fas fa-car"></i>
-                        </div>
-                        <div style={styles.detailContent}>
-                            <span style={styles.detailLabel}>CO</span>
-                            <span style={styles.detailValue} id="co-value">2.1 mg/m³</span>
-                            <span style={styles.detailDesc}>Karbon Monoksit</span>
-                        </div>
-                    </div>
-                    <div style={styles.detailItem}>
-                        <div style={{...styles.detailIcon, animationDelay: '0.7s'}} className="icon-float">
-                            <i className="fas fa-city"></i>
-                        </div>
-                        <div style={styles.detailContent}>
-                            <span style={styles.detailLabel}>Yoğunluk</span>
-                            <span style={styles.detailValue} id="density-value">5,000 /km²</span>
-                            <span style={styles.detailDesc}>Density</span>
-                        </div>
-                    </div>
-                    <div style={styles.detailItem}>
-                        <div style={{...styles.detailIcon, animationDelay: '0.8s'}} className="icon-float">
-                            <i className="fas fa-users"></i>
-                        </div>
-                        <div style={styles.detailContent}>
-                            <span style={styles.detailLabel}>Nüfus</span>
-                            <span style={styles.detailValue} id="population-value">250,000</span>
-                            <span style={styles.detailDesc}>Population</span>
-                        </div>
-                    </div>
-                    <div style={styles.detailItem}>
-                        <div style={{...styles.detailIcon, animationDelay: '0.9s'}} className="icon-float">
-                            <i className="fas fa-industry"></i>
-                        </div>
-                        <div style={styles.detailContent}>
-                            <span style={styles.detailLabel}>Sanayi Mesafesi</span>
-                            <span style={styles.detailValue} id="proximity-value">5 km</span>
-                            <span style={styles.detailDesc}>Industrial Proximity</span>
-                        </div>
-                    </div>
+                    ))}
                 </div>
 
                 {isAuthenticated ? (
@@ -152,14 +203,14 @@ const AQIInfo = ({ user, threshold = '100', onThresholdChange, onSaveSettings, s
                         <div style={styles.notificationForm}>
                             <div style={styles.formGroup}>
                                 <label htmlFor="threshold" style={styles.formLabel}>
-                                    <i className="fas fa-sliders-h" style={{marginRight: '8px'}}></i>
+                                    <i className="fas fa-sliders-h" style={{ marginRight: '8px' }}></i>
                                     Bildirim Eşiği (AQI)
                                 </label>
-                                <select 
+                                <select
                                     id="threshold"
                                     style={styles.formSelect}
                                     value={threshold}
-                                    onChange={handleThresholdChange}
+                                    onChange={handleThresholdChangeInternal}
                                 >
                                     <option value="50">50 - İyi</option>
                                     <option value="100">100 - Orta</option>
@@ -169,7 +220,7 @@ const AQIInfo = ({ user, threshold = '100', onThresholdChange, onSaveSettings, s
                                 </select>
                             </div>
                             <button style={styles.btnPrimary} onClick={saveSettings}>
-                                <i className="fas fa-save" style={{marginRight: '8px'}}></i>
+                                <i className="fas fa-save" style={{ marginRight: '8px' }}></i>
                                 Ayarları Kaydet
                             </button>
                         </div>

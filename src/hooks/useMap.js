@@ -1,15 +1,31 @@
-import { useCallback, useState } from 'react';
-import { updateAQI } from '../utils/aqi';
+import { useCallback, useMemo, useState } from 'react';
 
-export const useMap = (mapCenter) => {
+export const useMap = (mapCenter, options = {}) => {
     const [map, setMap] = useState(null);
     const [marker, setMarker] = useState(null);
+    const { onLocationChange } = options;
+
+    const notifyLocationChange = useMemo(() => {
+        if (typeof onLocationChange !== 'function') {
+            return () => {};
+        }
+
+        return ({ lat, lng }) => {
+            try {
+                if (typeof lat === 'number' && typeof lng === 'number') {
+                    onLocationChange({ lat, lng });
+                }
+            } catch (err) {
+                console.warn('Konum bilgisi bildirilirken hata oluştu:', err);
+            }
+        };
+    }, [onLocationChange]);
 
     const initMap = useCallback(() => {
         try {
-            const mapElement = document.getElementById("map");
+            const mapElement = document.getElementById('map');
             if (!mapElement || !window.L) {
-                console.warn('Map initialization skipped - element or Leaflet not available');
+                console.warn('Harita başlatma atlandı - element veya Leaflet bulunamadı');
                 return;
             }
 
@@ -17,64 +33,54 @@ export const useMap = (mapCenter) => {
 
             window.L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
                 attribution: '© OpenStreetMap contributors',
-                maxZoom: 19
+                maxZoom: 19,
             }).addTo(newMap);
 
             const customIcon = window.L.divIcon({
                 html: '<i class="fas fa-map-marker-alt" style="font-size: 32px; color: #e74c3c;"></i>',
                 iconSize: [32, 32],
                 iconAnchor: [16, 32],
-                className: 'custom-marker'
+                className: 'custom-marker',
             });
 
             const newMarker = window.L.marker([mapCenter.lat, mapCenter.lng], {
                 icon: customIcon,
-                draggable: true
+                draggable: true,
             }).addTo(newMap);
 
             newMap.on('click', (e) => {
                 try {
                     newMarker.setLatLng(e.latlng);
-                    setTimeout(() => {
-                        try {
-                            updateAQI();
-                        } catch (err) {
-                            console.warn('Error updating AQI:', err);
-                        }
-                    }, 100);
+                    notifyLocationChange({ lat: e.latlng.lat, lng: e.latlng.lng });
                 } catch (err) {
-                    console.warn('Error handling map click:', err);
+                    console.warn('Harita tıklama olayında hata:', err);
                 }
             });
 
             newMarker.on('dragend', () => {
                 try {
-                    setTimeout(() => {
-                        try {
-                            updateAQI();
-                        } catch (err) {
-                            console.warn('Error updating AQI:', err);
-                        }
-                    }, 100);
+                    const position = newMarker.getLatLng();
+                    notifyLocationChange({ lat: position.lat, lng: position.lng });
                 } catch (err) {
-                    console.warn('Error handling marker drag:', err);
+                    console.warn('Marker sürükleme olayında hata:', err);
                 }
             });
 
             setMap(newMap);
             setMarker(newMarker);
+            notifyLocationChange({ lat: mapCenter.lat, lng: mapCenter.lng });
 
             return () => {
                 try {
                     newMap.remove();
                 } catch (err) {
-                    console.warn('Error removing map:', err);
+                    console.warn('Harita kaldırılırken hata:', err);
                 }
             };
         } catch (err) {
-            console.error('Error initializing map:', err);
+            console.error('Harita başlatılırken hata oluştu:', err);
         }
-    }, [mapCenter]);
+    }, [mapCenter, notifyLocationChange]);
 
     return { map, marker, initMap };
 };

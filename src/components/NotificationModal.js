@@ -16,10 +16,47 @@ const NotificationModal = ({
     threshold = '100',
     onThresholdChange,
     userEmail,
+    selectedLocation,
 }) => {
     const [location, setLocation] = useState(null);
     const [locationStatus, setLocationStatus] = useState('idle');
     const [locationMessage, setLocationMessage] = useState('');
+
+    const normalizeLocation = (loc) => {
+        if (!loc || typeof loc !== 'object') {
+            return null;
+        }
+
+        const parseCoordinate = (value) => {
+            if (typeof value === 'number' && !Number.isNaN(value)) {
+                return value;
+            }
+            if (typeof value === 'string') {
+                const parsed = Number(value);
+                if (!Number.isNaN(parsed)) {
+                    return parsed;
+                }
+            }
+            return null;
+        };
+
+        const latitude = parseCoordinate(loc.latitude ?? loc.lat);
+        const longitude = parseCoordinate(loc.longitude ?? loc.lng ?? loc.long);
+
+        if (latitude === null || longitude === null) {
+            return null;
+        }
+
+        return {
+            latitude: parseFloat(latitude.toFixed(6)),
+            longitude: parseFloat(longitude.toFixed(6)),
+        };
+    };
+
+    const normalizedLocation = normalizeLocation(location);
+    const normalizedSelectedLocation = normalizeLocation(selectedLocation);
+    const effectiveLocation = normalizedLocation || normalizedSelectedLocation;
+    const usingFallbackLocation = !normalizedLocation && !!normalizedSelectedLocation;
 
     useEffect(() => {
         if (!isOpen) {
@@ -67,14 +104,27 @@ const NotificationModal = ({
     };
 
     const handleSubscribeClick = () => {
-        if (!location) {
+        if (!effectiveLocation) {
             setLocationStatus('error');
-            setLocationMessage('Konum almadan devam edemezsiniz. Lütfen önce konum paylaşın.');
+            setLocationMessage('Konum almadan devam edemezsiniz. Lütfen haritadan seçim yapın veya konum paylaşın.');
             return;
         }
 
         if (onSubscribe) {
-            onSubscribe({ ...location, threshold });
+            if (usingFallbackLocation) {
+                setLocationStatus('success');
+                setLocationMessage(
+                    `Haritada seçtiğiniz konum kullanılacak: ${effectiveLocation.latitude}, ${effectiveLocation.longitude}`
+                );
+            }
+
+            onSubscribe({
+                latitude: effectiveLocation.latitude,
+                longitude: effectiveLocation.longitude,
+                lat: effectiveLocation.latitude,
+                long: effectiveLocation.longitude,
+                threshold,
+            });
         }
     };
 
@@ -123,14 +173,20 @@ const NotificationModal = ({
                                 <i className="fas fa-location-arrow" style={{ marginRight: '8px' }}></i>
                                 Konumumu Paylaş
                             </button>
-                            {location && (
+                            {normalizedLocation && (
                                 <div style={styles.locationPreview}>
                                     <i className="fas fa-map-marker-alt" style={{ marginRight: '6px' }}></i>
-                                    {location.latitude}, {location.longitude}
+                                    {normalizedLocation.latitude}, {normalizedLocation.longitude}
+                                </div>
+                            )}
+                            {!normalizedLocation && normalizedSelectedLocation && (
+                                <div style={styles.locationPreview}>
+                                    <i className="fas fa-map-marker-alt" style={{ marginRight: '6px' }}></i>
+                                    Harita: {normalizedSelectedLocation.latitude}, {normalizedSelectedLocation.longitude}
                                 </div>
                             )}
                         </div>
-                        {locationMessage && (
+                        {(locationMessage || usingFallbackLocation) && (
                             <p
                                 style={{
                                     ...styles.statusMessage,
@@ -142,7 +198,7 @@ const NotificationModal = ({
                                             : '#2d3748',
                                 }}
                             >
-                                {locationMessage}
+                                {locationMessage || 'Haritada seçtiğiniz konum kullanılacaktır.'}
                             </p>
                         )}
                     </section>
@@ -222,7 +278,7 @@ const NotificationModal = ({
                             cursor: !location || isSubmitting ? 'not-allowed' : 'pointer',
                         }}
                         onClick={handleSubscribeClick}
-                        disabled={!location || isSubmitting}
+                        disabled={!effectiveLocation || isSubmitting}
                     >
                         {isSubmitting ? (
                             <>

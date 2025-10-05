@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import '@fortawesome/fontawesome-free/css/all.min.css';
 import './styles/global.css';
 
@@ -15,7 +15,7 @@ import { useGoogleAuth } from './hooks/useGoogleAuth';
 import { useMap } from './hooks/useMap';
 
 // Utils
-import { updateAQI, getApiBaseUrl } from './utils';
+import { fetchAirQualityData, getApiBaseUrl } from './utils';
 
 // Constants
 import { cities } from './constants/cities';
@@ -24,17 +24,25 @@ import { cities } from './constants/cities';
 import { styles } from './styles/components';
 
 function App() {
+    const defaultCenter = { lat: 39.9334, lng: 32.8597, zoom: 6 };
     const [selectedCity, setSelectedCity] = useState("");
-    const [mapCenter, setMapCenter] = useState({ lat: 39.9334, lng: 32.8597, zoom: 6 });
+    const [mapCenter, setMapCenter] = useState(defaultCenter);
+    const [selectedLocation, setSelectedLocation] = useState({ lat: defaultCenter.lat, lng: defaultCenter.lng });
     const [isNotificationModalOpen, setNotificationModalOpen] = useState(false);
     const [notificationThreshold, setNotificationThreshold] = useState('100');
     const [notificationStatus, setNotificationStatus] = useState({ state: 'idle', message: '' });
     const [isSubmittingNotification, setIsSubmittingNotification] = useState(false);
+    const [aqiData, setAqiData] = useState(null);
+    const [aqiLoading, setAqiLoading] = useState(true);
+    const [aqiError, setAqiError] = useState(null);
 
     const apiBaseUrl = useMemo(() => getApiBaseUrl(), []);
 
     const { user, loading, error, handleGoogleLogin, handleLogout } = useGoogleAuth();
-    const { map, marker, initMap } = useMap(mapCenter);
+    const handleLocationChange = useCallback(({ lat, lng }) => {
+        setSelectedLocation({ lat, lng });
+    }, []);
+    const { map, marker, initMap } = useMap(mapCenter, { onLocationChange: handleLocationChange });
 
     useEffect(() => {
         let leafletCSS = null;
@@ -102,13 +110,76 @@ function App() {
         });
     };
 
-    const handleNotificationSubscribe = async ({ latitude, longitude, threshold }) => {
-        if (!latitude || !longitude) {
+    useEffect(() => {
+        if (!selectedLocation || typeof selectedLocation.lat !== 'number' || typeof selectedLocation.lng !== 'number') {
+            return;
+        }
+
+        let isMounted = true;
+        const controller = new AbortController();
+
+        const loadAirQuality = async () => {
+            setAqiLoading(true);
+            setAqiError(null);
+
+            try {
+                const data = await fetchAirQualityData({
+                    latitude: selectedLocation.lat,
+                    longitude: selectedLocation.lng,
+                    baseUrl: apiBaseUrl,
+                    signal: controller.signal,
+                });
+
+                if (isMounted) {
+                    setAqiData(data);
+                }
+            } catch (err) {
+                if (!isMounted || err.name === 'AbortError') {
+                    return;
+                }
+
+                console.error('Hava kalitesi verisi alınamadı:', err);
+                setAqiData(null);
+                setAqiError(err.message || 'Hava kalitesi verileri alınamadı.');
+            } finally {
+                if (isMounted) {
+                    setAqiLoading(false);
+                }
+            }
+        };
+
+        loadAirQuality();
+
+        return () => {
+            isMounted = false;
+            controller.abort();
+        };
+    }, [selectedLocation, apiBaseUrl]);
+
+    const handleNotificationSubscribe = async (payload = {}) => {
+        const toNumber = (value) => {
+            if (typeof value === 'number' && !Number.isNaN(value)) {
+                return value;
+            }
+            if (typeof value === 'string') {
+                const parsed = Number(value);
+                return Number.isNaN(parsed) ? null : parsed;
+            }
+            return null;
+        };
+
+        const latitudeCandidates = [payload.latitude, payload.lat];
+        const longitudeCandidates = [payload.longitude, payload.lng, payload.long];
+
+        const latitude = latitudeCandidates.map(toNumber).find((value) => value !== null) ?? null;
+        const longitude = longitudeCandidates.map(toNumber).find((value) => value !== null) ?? null;
+
+        if (latitude === null || longitude === null) {
             setNotificationStatus({ state: 'error', message: 'Konum bilgisi alınamadı. Lütfen tekrar deneyin.' });
             return;
         }
 
-        const payloadThreshold = threshold || notificationThreshold;
+        const payloadThreshold = payload.threshold || notificationThreshold;
 
         setIsSubmittingNotification(true);
         setNotificationStatus({ state: 'loading', message: 'Bildirim tercihiniz kaydediliyor...' });
@@ -121,8 +192,10 @@ function App() {
                     'Content-Type': 'application/json',
                 },
                 body: JSON.stringify({
-                    latitude: parseFloat(latitude),
-                    longitude: parseFloat(longitude),
+                    latitude: parseFloat(latitude.toFixed(6)),
+                    longitude: parseFloat(longitude.toFixed(6)),
+                    lat: parseFloat(latitude.toFixed(6)),
+                    long: parseFloat(longitude.toFixed(6)),
                     threshold: parseInt(payloadThreshold, 10),
                     email: user?.email,
                 }),
@@ -154,12 +227,12 @@ function App() {
         
         const city = cities.find(c => c.name === cityName);
         if (city) {
-            setMapCenter({ lat: city.lat, lng: city.lng, zoom: 12 });
+            const nextCenter = { lat: city.lat, lng: city.lng, zoom: 12 };
+            setMapCenter(nextCenter);
+            setSelectedLocation({ lat: city.lat, lng: city.lng });
             if (map && marker) {
                 map.setView([city.lat, city.lng], 12);
                 marker.setLatLng([city.lat, city.lng]);
-                // DOM yüklendikten sonra updateAQI'yi çağır
-                setTimeout(() => updateAQI(), 100);
             }
         }
     };
@@ -196,6 +269,10 @@ function App() {
                             onThresholdChange={handleThresholdChange}
                             onSaveSettings={handleNotificationSettingsSave}
                             status={notificationStatus}
+                            aqiData={aqiData}
+                            aqiLoading={aqiLoading}
+                            aqiError={aqiError}
+                            selectedLocation={selectedLocation}
                         />
                     </section>
                     <AQILevels />
@@ -213,6 +290,7 @@ function App() {
                 threshold={notificationThreshold}
                 onThresholdChange={handleThresholdChange}
                 userEmail={user?.email}
+                selectedLocation={selectedLocation}
             />
         </div>
     );

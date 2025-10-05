@@ -1,8 +1,12 @@
 import { render, screen } from '@testing-library/react';
 import App from './App';
 
-test('renders learn react link', () => {
+test('başlığı ve harita bileşenini render eder', () => {
   render(<App />);
-  const linkElement = screen.getByText(/learn react/i);
-  expect(linkElement).toBeInTheDocument();
+
+  const headerTitles = screen.getAllByText(/clean breathing/i);
+  expect(headerTitles.length).toBeGreaterThan(0);
+
+  const citySelect = screen.getByLabelText(/şehir seçin/i);
+  expect(citySelect).toBeInTheDocument();
 });
