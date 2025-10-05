@@ -1,19 +1,135 @@
-import { useCallback } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { getApiBaseUrl } from '../utils';
 
 export const useGoogleAuth = () => {
+    const [user, setUser] = useState(null);
+    const [loading, setLoading] = useState(true);
+    const [error, setError] = useState(null);
+
+    const apiBaseUrl = useMemo(() => getApiBaseUrl(), []);
+
+    const fetchCurrentUser = useCallback(async () => {
+        setLoading(true);
+
+        try {
+            const response = await fetch(`${apiBaseUrl}/me`, {
+                credentials: 'include',
+            });
+
+            if (!response.ok) {
+                if (response.status !== 401) {
+                    console.warn(`Backend /me endpoint returned ${response.status}. User will remain logged out.`);
+                }
+
+                setUser(null);
+                setError(null);
+                return;
+            }
+
+            const data = await response.json();
+            setUser(data);
+            setError(null);
+        } catch (err) {
+            // Network error or backend not available - silently fail and keep user logged out
+            console.warn('Backend authentication service unavailable:', err.message);
+            setError(null); // Don't show error to user if backend is just not running
+            setUser(null);
+        } finally {
+            setLoading(false);
+        }
+    }, [apiBaseUrl]);
+
     const handleGoogleLogin = useCallback(() => {
-        // Backend OAuth endpoint'ine yönlendir
-        window.location.href = 'https://clean-breathing-710737072c4d.herokuapp.com/auth/google/login';
-    }, []);
+        window.location.href = `${apiBaseUrl}/auth/google/login`;
+    }, [apiBaseUrl]);
 
-    const handleLogout = useCallback(() => {
-        // Kullanıcı bilgilerini temizle
-        document.getElementById("user-name").textContent = "Kullanıcı";
-        document.getElementById("user-avatar").textContent = "K";
-        document.getElementById("user-info").classList.add("hidden");
-        document.getElementById("login-button").classList.remove("hidden");
-        document.getElementById("notification-settings").classList.add("hidden");
-    }, []);
+    const handleLogout = useCallback(async () => {
+        setLoading(true);
 
-    return { handleGoogleLogin, handleLogout };
+        try {
+            await fetch(`${apiBaseUrl}/auth/logout`, {
+                method: 'POST',
+                credentials: 'include',
+            });
+        } catch (err) {
+            console.error('Çıkış yapılırken hata oluştu:', err);
+        } finally {
+            setUser(null);
+            setLoading(false);
+        }
+    }, [apiBaseUrl]);
+
+    useEffect(() => {
+        let isMounted = true;
+
+        const syncUserFromBackend = async () => {
+            setLoading(true);
+
+            try {
+                const url = new URL(window.location.href);
+                const params = url.searchParams;
+                const hasAuthParams = ['code', 'state', 'authSuccess', 'session'].some((param) =>
+                    params.has(param)
+                );
+
+                // Inline the fetch logic to avoid dependency issues
+                try {
+                    const response = await fetch(`${apiBaseUrl}/me`, {
+                        credentials: 'include',
+                    });
+
+                    if (!response.ok) {
+                        if (response.status !== 401) {
+                            console.warn(`Backend /me endpoint returned ${response.status}. User will remain logged out.`);
+                        }
+                        if (isMounted) {
+                            setUser(null);
+                            setError(null);
+                        }
+                    } else {
+                        const data = await response.json();
+                        if (isMounted) {
+                            setUser(data);
+                            setError(null);
+                        }
+                    }
+                } catch (err) {
+                    console.warn('Backend authentication service unavailable:', err.message);
+                    if (isMounted) {
+                        setError(null);
+                        setUser(null);
+                    }
+                }
+
+                if (isMounted && hasAuthParams) {
+                    params.delete('code');
+                    params.delete('state');
+                    params.delete('authSuccess');
+                    params.delete('session');
+                    window.history.replaceState({}, document.title, url.pathname + (params.toString() ? `?${params}` : ''));
+                }
+            } catch (err) {
+                console.error('Error during auth initialization:', err);
+            } finally {
+                if (isMounted) {
+                    setLoading(false);
+                }
+            }
+        };
+
+        syncUserFromBackend();
+
+        return () => {
+            isMounted = false;
+        };
+    }, [apiBaseUrl]); // Only depend on apiBaseUrl which is memoized
+
+    return {
+        user,
+        loading,
+        error,
+        handleGoogleLogin,
+        handleLogout,
+        refreshUser: fetchCurrentUser,
+    };
 };

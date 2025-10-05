@@ -1,13 +1,29 @@
 import React from 'react';
 import { styles } from '../styles/components';
 
-const AQIInfo = () => {
-    const saveSettings = () => {
-        const threshold = document.getElementById("threshold").value;
-        alert(
-            `Bildirim eşiği ${threshold} AQI olarak ayarlandı. Hava kalitesi bu değeri aştığında e-posta bildirimi alacaksınız.`
-        );
+const AQIInfo = ({ user, threshold = '100', onThresholdChange, onSaveSettings, status }) => {
+    const isAuthenticated = Boolean(user);
+    const notificationState = status?.state;
+    const notificationMessage = status?.message;
+
+    const handleThresholdChange = (event) => {
+        if (onThresholdChange) {
+            onThresholdChange(event.target.value);
+        }
     };
+
+    const saveSettings = () => {
+        if (onSaveSettings) {
+            onSaveSettings();
+        }
+    };
+
+    const helperIconClass =
+        notificationState === 'error'
+            ? 'fas fa-exclamation-circle'
+            : notificationState === 'info'
+            ? 'fas fa-info-circle'
+            : 'fas fa-check-circle';
 
     return (
         <div style={styles.card}>
@@ -124,34 +140,62 @@ const AQIInfo = () => {
                     </div>
                 </div>
 
-                <div className="notification-settings hidden" id="notification-settings" style={styles.notificationSettings}>
-                    <div style={styles.notificationHeader}>
-                        <i className="fas fa-bell" style={styles.bellIcon}></i>
-                        <h3 style={styles.notificationTitle}>Bildirim Ayarları</h3>
-                    </div>
-                    <p style={styles.notificationDesc}>
-                        Hava kalitesi belirli bir seviyenin üzerine çıktığında e-posta bildirimi alın
-                    </p>
-                    <div style={styles.notificationForm}>
-                        <div style={styles.formGroup}>
-                            <label htmlFor="threshold" style={styles.formLabel}>
-                                <i className="fas fa-sliders-h" style={{marginRight: '8px'}}></i>
-                                Bildirim Eşiği (AQI)
-                            </label>
-                            <select id="threshold" style={styles.formSelect}>
-                                <option value="50">50 - İyi</option>
-                                <option value="100">100 - Orta</option>
-                                <option value="150">150 - Hassas Gruplar İçin Sağlıksız</option>
-                                <option value="200">200 - Sağlıksız</option>
-                                <option value="300">300 - Çok Sağlıksız</option>
-                            </select>
+                {isAuthenticated ? (
+                    <div style={styles.notificationSettings}>
+                        <div style={styles.notificationHeader}>
+                            <i className="fas fa-bell" style={styles.bellIcon}></i>
+                            <h3 style={styles.notificationTitle}>Bildirim Ayarları</h3>
                         </div>
-                        <button style={styles.btnPrimary} onClick={saveSettings}>
-                            <i className="fas fa-save" style={{marginRight: '8px'}}></i>
-                            Ayarları Kaydet
-                        </button>
+                        <p style={styles.notificationDesc}>
+                            Hava kalitesi belirli bir seviyenin üzerine çıktığında e-posta bildirimi alın
+                        </p>
+                        <div style={styles.notificationForm}>
+                            <div style={styles.formGroup}>
+                                <label htmlFor="threshold" style={styles.formLabel}>
+                                    <i className="fas fa-sliders-h" style={{marginRight: '8px'}}></i>
+                                    Bildirim Eşiği (AQI)
+                                </label>
+                                <select 
+                                    id="threshold"
+                                    style={styles.formSelect}
+                                    value={threshold}
+                                    onChange={handleThresholdChange}
+                                >
+                                    <option value="50">50 - İyi</option>
+                                    <option value="100">100 - Orta</option>
+                                    <option value="150">150 - Hassas Gruplar İçin Sağlıksız</option>
+                                    <option value="200">200 - Sağlıksız</option>
+                                    <option value="300">300 - Çok Sağlıksız</option>
+                                </select>
+                            </div>
+                            <button style={styles.btnPrimary} onClick={saveSettings}>
+                                <i className="fas fa-save" style={{marginRight: '8px'}}></i>
+                                Ayarları Kaydet
+                            </button>
+                        </div>
+                        {notificationMessage && (
+                            <div
+                                style={{
+                                    ...styles.notificationHelper,
+                                    color:
+                                        notificationState === 'error'
+                                            ? '#e53e3e'
+                                            : notificationState === 'info'
+                                            ? '#2b6cb0'
+                                            : '#2f855a',
+                                }}
+                            >
+                                <i className={helperIconClass} style={{ marginRight: '8px' }}></i>
+                                {notificationMessage}
+                            </div>
+                        )}
                     </div>
-                </div>
+                ) : (
+                    <div style={styles.notificationLocked}>
+                        <i className="fas fa-lock" style={{ marginRight: '10px' }}></i>
+                        Bildirim ayarlarını yönetmek için lütfen giriş yapın.
+                    </div>
+                )}
             </div>
         </div>
     );
