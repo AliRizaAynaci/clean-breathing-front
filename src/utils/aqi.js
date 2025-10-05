@@ -167,12 +167,34 @@ export const formatMetricValue = (key, value) => {
 const normalizeAirQualityResponse = (payload = {}) => {
 	const latitude = pickNumeric(payload.latitude, payload.lat, payload.Latitude);
 	const longitude = pickNumeric(payload.longitude, payload.lng, payload.long, payload.Longitude);
-	const riskLevel = payload.risk_level ?? payload.riskLevel ?? null;
+	let riskLevel = payload.risk_level ?? payload.riskLevel ?? null;
+	
+	// Normalize metrics first
+	const metrics = normalizeMetrics(payload.metrics);
+
+	// If backend returns 'unknown', calculate fallback risk level from PM2.5/PM10
+	if (riskLevel === 'unknown' || !riskLevel) {
+		const pm25 = metrics.pm25;
+		const pm10 = metrics.pm10;
+		
+		// Try to calculate AQI from PM2.5 first (more accurate), fallback to PM10
+		let calculatedAQI = null;
+		if (pm25 !== null && pm25 !== undefined) {
+			calculatedAQI = calculateAQI(pm25, PM25_AQI_BREAKPOINTS);
+		} else if (pm10 !== null && pm10 !== undefined) {
+			calculatedAQI = calculateAQI(pm10, PM10_AQI_BREAKPOINTS);
+		}
+		
+		if (calculatedAQI !== null) {
+			riskLevel = getRiskLevelFromAQI(calculatedAQI);
+			console.log(`Backend returned 'unknown', calculated fallback risk level: ${riskLevel} (AQI: ${calculatedAQI})`);
+		}
+	}
 
 	return {
 		latitude,
 		longitude,
-		metrics: normalizeMetrics(payload.metrics),
+		metrics,
 		riskLevel,
 		riskLevelLabel: getRiskLevelLabel(riskLevel),
 		riskLevelClassName: getRiskLevelClassName(riskLevel),
@@ -194,20 +216,40 @@ export const fetchAirQualityData = async ({ latitude, longitude, signal, baseUrl
 	url.searchParams.set('latitude', latNumber.toString());
 	url.searchParams.set('longitude', longNumber.toString());
 
-	const response = await fetch(url.toString(), {
-		method: 'GET',
-		credentials: 'include',
-		signal,
-		headers: {
-			Accept: 'application/json',
-		},
-	});
+	try {
+		console.log(`Fetching from backend: ${url.toString()}`);
+		
+		const response = await fetch(url.toString(), {
+			method: 'GET',
+			credentials: 'include',
+			signal,
+			headers: {
+				Accept: 'application/json',
+			},
+		});
 
-	if (!response.ok) {
-		if (response.status === 401 || response.status === 403) {
-			console.warn(
-				'Arka uç istekleri yetkisiz yanıt döndürdü. Open-Meteo üzerinden yedek veri alınacak.'
-			);
+		if (!response.ok) {
+			console.warn(`Backend responded with status ${response.status}`);
+			
+			if (response.status === 401 || response.status === 403) {
+				console.warn('Unauthorized, falling back to Open-Meteo');
+				const fallbackPayload = await fetchAirQualityDataFromOpenMeteo({
+					latitude: latNumber,
+					longitude: longNumber,
+					signal,
+				});
+				return normalizeAirQualityResponse(fallbackPayload);
+			}
+
+			let message = '';
+			try {
+				message = await response.text();
+			} catch (error) {
+				console.warn('Could not read error response:', error);
+			}
+			
+			// For other HTTP errors, also try fallback
+			console.warn(`Backend error (${response.status}), trying Open-Meteo fallback`);
 			const fallbackPayload = await fetchAirQualityDataFromOpenMeteo({
 				latitude: latNumber,
 				longitude: longNumber,
@@ -216,17 +258,22 @@ export const fetchAirQualityData = async ({ latitude, longitude, signal, baseUrl
 			return normalizeAirQualityResponse(fallbackPayload);
 		}
 
-		let message = '';
-		try {
-			message = await response.text();
-		} catch (error) {
-			console.warn('Sunucu hata mesajı okunamadı:', error);
-		}
-		throw new Error(message || `Air quality verisi alınamadı (${response.status})`);
+		const data = await response.json();
+		console.log('Backend data received:', { riskLevel: data.risk_level, hasMetrics: !!data.metrics });
+		return normalizeAirQualityResponse(data);
+		
+	} catch (error) {
+		// Network error, CORS, timeout, etc.
+		console.warn('Backend fetch failed:', error.message);
+		console.log('Falling back to Open-Meteo API');
+		
+		const fallbackPayload = await fetchAirQualityDataFromOpenMeteo({
+			latitude: latNumber,
+			longitude: longNumber,
+			signal,
+		});
+		return normalizeAirQualityResponse(fallbackPayload);
 	}
-
-	const data = await response.json();
-	return normalizeAirQualityResponse(data);
 };
 
 const fetchAirQualityDataFromOpenMeteo = async ({ latitude, longitude, signal }) => {
