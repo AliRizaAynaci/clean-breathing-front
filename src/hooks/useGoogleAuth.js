@@ -78,13 +78,25 @@ export const useGoogleAuth = () => {
 
                 // Inline the fetch logic to avoid dependency issues
                 try {
+                    console.log('[Auth Debug] Checking user authentication...');
+                    console.log('[Auth Debug] API URL:', `${apiBaseUrl}/me`);
+                    console.log('[Auth Debug] Current cookies:', document.cookie);
+                    
                     const response = await fetch(`${apiBaseUrl}/me`, {
                         credentials: 'include',
+                        headers: {
+                            'Accept': 'application/json',
+                        },
                     });
+
+                    console.log('[Auth Debug] Response status:', response.status);
+                    console.log('[Auth Debug] Response headers:', [...response.headers.entries()]);
 
                     if (!response.ok) {
                         if (response.status !== 401) {
                             console.warn(`Backend /me endpoint returned ${response.status}. User will remain logged out.`);
+                        } else {
+                            console.log('[Auth Debug] User not authenticated (401)');
                         }
                         if (isMounted) {
                             setUser(null);
@@ -92,12 +104,14 @@ export const useGoogleAuth = () => {
                         }
                     } else {
                         const data = await response.json();
+                        console.log('[Auth Debug] User data received:', data);
                         if (isMounted) {
                             setUser(data);
                             setError(null);
                         }
                     }
                 } catch (err) {
+                    console.error('[Auth Debug] Fetch failed:', err.message);
                     console.warn('Backend authentication service unavailable:', err.message);
                     if (isMounted) {
                         setError(null);
