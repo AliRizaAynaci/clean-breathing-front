@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { styles } from '../styles/components';
 
 const getInitials = (nameOrEmail) => {
@@ -21,6 +21,60 @@ const Header = ({ user, loading, onGoogleLogin, onLogout, onNotificationsClick, 
     const notificationState = notificationsStatus?.state;
     const hasActiveSubscription = notificationState === 'success';
     const hasError = notificationState === 'error';
+    const [isProfileMenuOpen, setProfileMenuOpen] = useState(false);
+    const profileMenuRef = useRef(null);
+
+    const closeProfileMenu = () => setProfileMenuOpen(false);
+
+    useEffect(() => {
+        if (!isProfileMenuOpen) {
+            return undefined;
+        }
+
+        const handleClickOutside = (event) => {
+            if (profileMenuRef.current && !profileMenuRef.current.contains(event.target)) {
+                closeProfileMenu();
+            }
+        };
+
+        const handleKeyDown = (event) => {
+            if (event.key === 'Escape') {
+                closeProfileMenu();
+            }
+        };
+
+        document.addEventListener('mousedown', handleClickOutside);
+        document.addEventListener('keydown', handleKeyDown);
+
+        return () => {
+            document.removeEventListener('mousedown', handleClickOutside);
+            document.removeEventListener('keydown', handleKeyDown);
+        };
+    }, [isProfileMenuOpen]);
+
+    useEffect(() => {
+        if (!user) {
+            closeProfileMenu();
+        }
+    }, [user]);
+
+    const handleNotifications = () => {
+        if (onNotificationsClick) {
+            onNotificationsClick();
+        }
+        closeProfileMenu();
+    };
+
+    const handleProfileToggle = () => {
+        setProfileMenuOpen((prev) => !prev);
+    };
+
+    const handleLogout = () => {
+        if (onLogout) {
+            onLogout();
+        }
+        closeProfileMenu();
+    };
 
     return (
         <header style={styles.header}>
@@ -53,7 +107,7 @@ const Header = ({ user, loading, onGoogleLogin, onLogout, onNotificationsClick, 
                                     <button 
                                         type="button" 
                                         style={styles.menuButton}
-                                        onClick={() => onNotificationsClick && onNotificationsClick()}
+                                        onClick={handleNotifications}
                                     >
                                         <i className="fas fa-bell" style={{ marginRight: '6px' }}></i>
                                         Bildirimler
@@ -64,19 +118,59 @@ const Header = ({ user, loading, onGoogleLogin, onLogout, onNotificationsClick, 
                                             <span style={{ ...styles.notificationDot, background: '#ff6b6b' }} aria-hidden="true"></span>
                                         )}
                                     </button>
-                                    <button type="button" style={styles.menuButton}>
-                                        <i className="fas fa-user" style={{ marginRight: '6px' }}></i>
-                                        Profil
-                                    </button>
+                                    <div style={styles.profileMenuWrapper} ref={profileMenuRef}>
+                                        <button
+                                            type="button"
+                                            style={isProfileMenuOpen ? { ...styles.menuButton, ...styles.menuButtonActive } : styles.menuButton}
+                                            onClick={handleProfileToggle}
+                                            aria-haspopup="true"
+                                            aria-expanded={isProfileMenuOpen}
+                                        >
+                                            <i className="fas fa-user" style={{ marginRight: '6px' }}></i>
+                                            Profil
+                                            <i
+                                                className={`fas fa-chevron-${isProfileMenuOpen ? 'up' : 'down'}`}
+                                                style={{ marginLeft: '6px', fontSize: '12px' }}
+                                                aria-hidden="true"
+                                            ></i>
+                                        </button>
+                                        {isProfileMenuOpen && (
+                                            <div style={styles.profileDropdown} role="menu">
+                                                <div style={styles.profileSummary}>
+                                                    <div style={styles.profileSummaryAvatar}>{initials}</div>
+                                                    <div style={styles.profileSummaryDetails}>
+                                                        <span style={styles.profileSummaryName}>{displayName}</span>
+                                                        {user?.email && (
+                                                            <span style={styles.profileSummaryEmail}>{user.email}</span>
+                                                        )}
+                                                    </div>
+                                                </div>
+                                                <div style={styles.profileDivider}></div>
+                                                <div style={styles.profileActions}>
+                                                    <button type="button" style={styles.profileActionButton} onClick={handleNotifications}>
+                                                        <i className="fas fa-bell"></i>
+                                                        Bildirim tercihleri
+                                                    </button>
+                                                    <button type="button" style={styles.profileActionButtonSecondary} disabled>
+                                                        <i className="fas fa-id-card"></i>
+                                                        Profil bilgileri (yakında)
+                                                    </button>
+                                                </div>
+                                                <div style={styles.profileDivider}></div>
+                                                <div style={styles.profileFooter}>
+                                                    <span style={styles.profileStatus}>
+                                                        <i className="fas fa-shield-alt"></i>
+                                                        Google ile doğrulandı
+                                                    </span>
+                                                    <button type="button" style={styles.profileLogoutButton} onClick={handleLogout}>
+                                                        <i className="fas fa-sign-out-alt"></i>
+                                                        Çıkış Yap
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        )}
+                                    </div>
                                 </nav>
-                                <button
-                                    onClick={onLogout}
-                                    style={styles.logoutButton}
-                                    title="Çıkış Yap"
-                                    type="button"
-                                >
-                                    <i className="fas fa-sign-out-alt"></i>
-                                </button>
                             </div>
                         ) : (
                             <button
